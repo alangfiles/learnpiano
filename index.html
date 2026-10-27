@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Piano Tester – Staff &amp; Key Signatures</title>
+<style>
+  :root { --bg:#14161c; --card:#1e222b; --fg:#e8eaf0; --mut:#8a91a3; --ok:#3ecf8e; --bad:#ff5c6c; --acc:#6ea8ff; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:16px/1.4 system-ui,-apple-system,sans-serif; background:var(--bg); color:var(--fg); }
+  header { padding:14px 20px; display:flex; gap:16px; align-items:center; flex-wrap:wrap; border-bottom:1px solid #2b303c; }
+  h1 { font-size:20px; margin:0; }
+  #midiStatus { font-size:13px; color:var(--mut); }
+  #midiStatus.on { color:var(--ok); }
+  main { max-width:1000px; margin:0 auto; padding:16px; display:grid; gap:16px; }
+  .card { background:var(--card); border-radius:12px; padding:16px; }
+  .row { display:flex; gap:16px; flex-wrap:wrap; align-items:center; }
+  h2 { font-size:14px; text-transform:uppercase; letter-spacing:.06em; color:var(--mut); margin:0 0 10px; }
+  .keys { display:grid; grid-template-columns:repeat(auto-fill,minmax(112px,1fr)); gap:6px; }
+  .keys label { background:#2a2f3b; border-radius:8px; padding:6px 8px; cursor:pointer; font-size:14px; display:flex; gap:6px; align-items:center; }
+  .keys label small { color:var(--mut); }
+  .keys label:has(input:checked) { background:#2f4468; }
+  select, button { background:#2a2f3b; color:var(--fg); border:1px solid #3a4150; border-radius:8px; padding:7px 12px; font:inherit; cursor:pointer; }
+  button:hover { background:#343b4a; }
+  button.primary { background:var(--acc); color:#0b1220; border-color:var(--acc); font-weight:600; }
+  #stage { background:#fff; border-radius:12px; padding:8px; position:relative; transition:background .15s; }
+  #stage.ok { background:#d8f7e8; }
+  #stage.bad { background:#ffdfe3; }
+  #stage svg { width:100%; height:auto; display:block; }
+  #prompt { color:#222; text-align:center; font-weight:600; min-height:24px; }
+  #feedback { text-align:center; min-height:28px; font-size:18px; font-weight:600; }
+  .stats { display:flex; gap:24px; flex-wrap:wrap; }
+  .stat b { display:block; font-size:22px; }
+  .stat span { font-size:12px; color:var(--mut); text-transform:uppercase; }
+  #piano { position:relative; height:110px; user-select:none; overflow-x:auto; white-space:nowrap; }
+  #pianoInner { position:relative; height:100%; }
+  .wk, .bk { position:absolute; top:0; border:1px solid #222; cursor:pointer; }
+  .wk { background:#f6f6f6; height:100%; width:26px; border-radius:0 0 4px 4px; }
+  .bk { background:#222; height:62%; width:16px; z-index:2; border-radius:0 0 3px 3px; }
+  .kl { position:absolute; left:0; right:0; text-align:center; font:600 12px system-ui,sans-serif; pointer-events:none; text-transform:uppercase; }
+  .wk .kl { bottom:6px; color:#555; } .bk .kl { bottom:6px; color:#ddd; }
+  .wk.down { background:var(--acc); } .bk.down { background:var(--acc); }
+  .wk.good { background:var(--ok); } .bk.good { background:var(--ok); }
+  .wk.wrong { background:var(--bad); } .bk.wrong { background:var(--bad); }
+  #beats { display:inline-flex; gap:5px; }
+  #beats i { width:12px; height:12px; border-radius:50%; background:#3a4150; display:block; }
+  #beats i.on { background:var(--acc); }
+  #beats i.on.first { background:var(--ok); }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { text-align:left; padding:4px 8px; border-bottom:1px solid #2b303c; }
+  th { color:var(--mut); font-weight:500; }
+  .small { font-size:13px; color:var(--mut); }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎹 Piano Tester</h1>
+  <span id="midiStatus">MIDI: checking…</span>
+  <select id="midiInput" hidden></select>
+</header>
+<main>
+  <section class="card row">
+    <label>Key signature
+      <select id="keySel"></select>
+    </label>
+    <label>Mode
+      <select id="mode">
+        <option value="scale">1. Major scale (up and down)</option>
+        <option value="walk1">2. Walk (1 step)</option>
+        <option value="walk2">3. Walk (2 steps max)</option>
+        <option value="walk3">4. Walk (3 steps max)</option>
+      </select>
+    </label>
+    <label>Clef
+      <select id="clef">
+        <option value="both" selected>Both (grand staff)</option>
+        <option value="treble">Treble only</option>
+        <option value="bass">Bass only</option>
+      </select>
+    </label>
+    <span class="row" style="gap:10px" id="noteVals">Note values:
+      <label><input type="checkbox" value="4"> Whole</label>
+      <label><input type="checkbox" value="2"> Half</label>
+      <label><input type="checkbox" value="1" checked> Quarter</label>
+      <label><input type="checkbox" value="0.5"> Eighth</label>
+    </span>
+    <label>Keyboard lowest C
+      <select id="kbLo">
+        <option value="36">C2</option>
+        <option value="48" selected>C3</option>
+        <option value="60">C4 (middle C)</option>
+      </select>
+    </label>
+    <label><input type="checkbox" id="showAlt"> Show which notes are sharp/flat</label>
+    <label><input type="checkbox" id="showKb" checked> On-screen keyboard</label>
+    <label><input type="checkbox" id="sound" checked> Sound</label>
+    <label>Play mode
+      <select id="playMode">
+        <option value="free">Free (no metronome)</option>
+        <option value="metro">Metronome (timed)</option>
+      </select>
+    </label>
+    <span class="row" style="gap:8px" id="bpmBox">
+      <input type="number" id="bpm" min="30" max="200" value="70" style="width:64px;background:#2a2f3b;color:var(--fg);border:1px solid #3a4150;border-radius:8px;padding:6px"> BPM (4/4)
+      <span id="beats"><i></i><i></i><i></i><i></i></span>
+    </span>
+    <button class="primary" id="start">Start / Next</button>
+    <button id="skip">Show answer</button>
+  </section>
+
+  <section class="card">
+    <div id="stage"><div id="prompt"></div><svg id="staff"></svg></div>
+    <div id="feedback"></div>
+    <div id="piano" class="card" style="padding:8px"><div id="pianoInner"></div></div>
+  </section>
+
+  <section class="card">
+    <h2>Session</h2>
+    <div class="stats">
+      <div class="stat"><b id="sCorrect">0</b><span>Correct first try</span></div>
+      <div class="stat"><b id="sTotal">0</b><span>Questions</span></div>
+      <div class="stat"><b id="sStreak">0</b><span>Streak</span></div>
+      <div class="stat"><b id="sAvg">–</b><span>Avg time (s)</span></div>
+    </div>
+    <h2 style="margin-top:16px">Per key signature (saved in this browser)</h2>
+    <table id="perKey"><thead><tr><th>Key</th><th>Questions</th><th>First-try %</th><th>Avg s</th></tr></thead><tbody></tbody></table>
+    <p><button id="reset">Reset saved stats</button></p>
+    <p class="small">Notes in the key signature are NOT marked with accidentals on the note itself — you must play the sharp or flat the signature demands. Use a MIDI keyboard (Chrome/Edge) or click the on-screen keys.</p>
+  </section>
+</main>
+
+<script>
+"use strict";
+// ---------- Music theory ----------
+const LETTERS = ["C","D","E","F","G","A","B"];
+const BASE_PC = [0,2,4,5,7,9,11];
+// Order in which sharps/flats are added (as letter indices)
+const SHARP_ORDER = [3,0,4,1,5,2,6]; // F C G D A E B
+const FLAT_ORDER  = [6,2,5,1,4,0,3]; // B E A D G C F
+// accidentals count: >0 sharps, <0 flats
+const KEYS = [
+  {n:0,  major:"C",  minor:"A"},
+  {n:1,  major:"G",  minor:"E"},
+  {n:2,  major:"D",  minor:"B"},
+  {n:3,  major:"A",  minor:"F♯"},
+  {n:4,  major:"E",  minor:"C♯"},
+  {n:5,  major:"B",  minor:"G♯"},
+  {n:6,  major:"F♯", minor:"D♯"},
+  {n:7,  major:"C♯", minor:"A♯"},
+  {n:-1, major:"F",  minor:"D"},
+  {n:-2, major:"B♭", minor:"G"},
+  {n:-3, major:"E♭", minor:"C"},
+  {n:-4, major:"A♭", minor:"F"},
+  {n:-5, major:"D♭", minor:"B♭"},
+  {n:-6, major:"G♭", minor:"E♭"},
+  {n:-7, major:"C♭", minor:"A♭"},
+];
+const keyByN = n => KEYS.find(k => k.n === n);
+const keyLabel = k => `${k.major} major / ${k.minor} minor`;
+const altList = n => n === 0 ? "" : (n > 0 ? SHARP_ORDER.slice(0,n) : FLAT_ORDER.slice(0,-n)).map(i => LETTERS[i] + (n>0?"♯":"♭")).join(" ");
+const sigText = n => n === 0 ? "no sharps or flats" : `${Math.abs(n)} ${n>0?"sharp":"flat"}${Math.abs(n)>1?"s":""}`;
+
+// alteration (-1,0,+1) of each letter index in key n
+function alterations(n) {
+  const a = [0,0,0,0,0,0,0];
+  if (n > 0) for (let i=0;i<n;i++) a[SHARP_ORDER[i]] = 1;
+  if (n < 0) for (let i=0;i<-n;i++) a[FLAT_ORDER[i]] = -1;
+  return a;
+}
+// diatonic step: 7*octave + letterIndex  (C4 = 28)
+const stepLetter = s => ((s % 7) + 7) % 7;
+const stepOctave = s => Math.floor(s / 7);
+const midiOf = (step, alt) => 12 * (stepOctave(step) + 1) + BASE_PC[stepLetter(step)] + alt;
+function noteName(step, alt) {
+  return LETTERS[stepLetter(step)] + (alt>0?"♯":alt<0?"♭":"") + stepOctave(step);
+}
+// tonic letter index of major key
+function tonicLetter(n) {
+  // C=0; each sharp raises tonic by a fifth (4 letter steps), each flat by a fourth (3)
+  return ((n >= 0 ? 4*n : 3*-n) % 7 + 7) % 7;
+}
+
+// ---------- Staff geometry ----------
+const CLEFS = {
+  treble: { bottomStep: 30, sharpTop: 38, flatTop: 38, glyph: "𝄞", range:[26,40],
+            sharps:[38,35,39,36,33,37,34], flats:[34,37,33,36,32,35,31] },
+  bass:   { bottomStep: 18, glyph: "𝄢", range:[16,30],
+            sharps:[24,21,25,22,19,23,20], flats:[20,23,19,22,18,21,17] },
+};
+// sharps treble: F5 C5 G5 D5 A4 E5 B4; bass: F3 C3 G3 D3 A2 E3 B2
+// flats treble: B4 E5 A4 D5 G4 C5 F4; bass: B2 E3 A2 D3 G2 C3 F2
+const SP = 16, HALF = SP/2, TOP = 60;
+const W = 760;
+
+function staffLayout(clefMode) {
+  const both = clefMode === "both";
+  const trebleTop = TOP;
+  const bassTop = both ? TOP + 96 : TOP;
+  return { both, trebleTop, bassTop, height: (both ? bassTop + 4*SP + 2*SP*2 + 30 : TOP + 4*SP + 4*SP + 20) };
+}
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs, text) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (text != null) e.textContent = text;
+  return e;
+}
+
+// notes: [{step, alt, clef, state}] ; state: undefined | "done" | "current"
+function renderStaff(svg, clefMode, n, notes) {
+  const L = staffLayout(clefMode);
+  svg.setAttribute("viewBox", `0 0 ${W} ${L.height}`);
+  svg.innerHTML = "";
+  const clefs = clefMode === "both" ? ["treble","bass"] : [clefMode];
+  const topOf = c => c === "treble" ? L.trebleTop : L.bassTop;
+  const yOf = (c, step) => topOf(c) + 4*SP - (step - CLEFS[c].bottomStep) * HALF;
+  const x0 = 20, x1 = W - 20;
+
+  for (const c of clefs) {
+    const top = topOf(c);
+    for (let i=0;i<5;i++) svg.appendChild(el("line",{x1:x0,x2:x1,y1:top+i*SP,y2:top+i*SP,stroke:"#222","stroke-width":1.2}));
+    const g = el("text",{x:x0+6,y: c==="treble" ? top+4*SP+ 2 : top+ 2*SP + 4 ,"font-size": c==="treble"?88:60,fill:"#222"},CLEFS[c].glyph);
+    if (c==="treble") g.setAttribute("y", top + 3.3*SP);
+    else g.setAttribute("y", top + 2.35*SP);
+    svg.appendChild(g);
+    // key signature
+    const list = n > 0 ? CLEFS[c].sharps : CLEFS[c].flats;
+    for (let i=0;i<Math.abs(n);i++) {
+      const t = el("text",{x:x0+70+i*15,y:yOf(c,list[i])+7,"font-size":30,fill:"#222"}, n>0?"♯":"♭");
+      svg.appendChild(t);
+    }
+    const tx = x0 + 70 + Math.abs(n)*15 + 8;
+    const ts = {x:tx,"font-size":34,"font-weight":"bold","font-family":"Georgia,serif",fill:"#222"};
+    svg.appendChild(el("text",{...ts,y:top+2*SP-2},"4"));
+    svg.appendChild(el("text",{...ts,y:top+4*SP-2},"4"));
+  }
+  if (L.both) {
+    svg.appendChild(el("line",{x1:x0,x2:x0,y1:L.trebleTop,y2:L.bassTop+4*SP,stroke:"#222","stroke-width":2}));
+  }
+
+  const startX = x0 + 70 + Math.abs(n)*15 + 8 + 24 + 22;
+  const count = notes.length;
+  const barOf = nt => Math.floor(nt.pos / 4 + 1e-9);
+  const bars = count ? barOf(notes[count-1]) : 0;
+  const BAR = bars > 8 ? 8 : 16;
+  const cum = []; let acc = 0;
+  notes.forEach((nt, i) => { cum[i] = acc; acc += nt.dur < 1 ? 0.75 : 1; });
+  const gap = count > 1 ? Math.min(60, (x1 - 30 - startX - bars*BAR) / cum[count-1]) : 0;
+  const xAt = i => count === 1 ? (startX + x1)/2 : startX + cum[i]*gap + barOf(notes[i])*BAR;
+  for (let i=1;i<count;i++) {
+    if (barOf(notes[i]) === barOf(notes[i-1])) continue;
+    const bx = (xAt(i-1) + xAt(i))/2;
+    for (const c of clefs) svg.appendChild(el("line",{x1:bx,x2:bx,y1:topOf(c),y2:topOf(c)+4*SP,stroke:"#222","stroke-width":1.4}));
+  }
+  notes.forEach((nt, i) => {
+    const cx = xAt(i);
+    const c = nt.clef;
+    const y = yOf(c, nt.step);
+    const off = nt.step - CLEFS[c].bottomStep;
+    const top = topOf(c);
+    const ledger = yy => svg.appendChild(el("line",{x1:cx-14,x2:cx+14,y1:yy,y2:yy,stroke:"#222","stroke-width":1.4}));
+    if (off <= -2) for (let e=-2;e>=off;e-=2) ledger(top+4*SP - e*HALF);
+    if (off >= 10) for (let e=10;e<=off;e+=2) ledger(top+4*SP - e*HALF);
+    const color = { done:"#1aa86a", good:"#1aa86a", off:"#e08a00", miss:"#dc2626", current:"#2563eb" }[nt.state] || "#222";
+    const hollow = nt.dur >= 2;
+    const head = nt.dur >= 4
+      ? el("ellipse",{cx,cy:y,rx:11,ry:7,fill:"none",stroke:color,"stroke-width":2.6})
+      : el("ellipse",{cx,cy:y,rx:9.5,ry:7,fill:hollow?"none":color,stroke:hollow?color:"none","stroke-width":2.2,transform:`rotate(-20 ${cx} ${y})`});
+    svg.appendChild(head);
+    if (nt.dur < 4) {
+      const up = off < 4;
+      const sx = up ? cx+8.5 : cx-8.5, sy = up ? y-3.4*SP : y+3.4*SP;
+      svg.appendChild(el("line",{x1:sx,x2:sx,y1:up?y-1:y+1,y2:sy,stroke:color,"stroke-width":1.6}));
+      if (nt.dur < 1) {
+        const d = up ? 1 : -1;
+        svg.appendChild(el("path",{d:`M${sx} ${sy} C${sx+2} ${sy+d*10} ${sx+14} ${sy+d*14} ${sx+9} ${sy+d*30}`,stroke:color,"stroke-width":2,fill:"none"}));
+      }
+    }
+  });
+  const cy1 = topOf(clefs[0]) - 12, cy2 = topOf(clefs[clefs.length-1]) + 4*SP + 12;
+  cursorEl = el("line",{x1:0,x2:0,y1:cy1,y2:cy2,stroke:"#e0245e","stroke-width":3,"stroke-linecap":"round",display:"none"});
+  svg.appendChild(cursorEl);
+  geom = { xAt, xStart: startX - 26 };
+}
+let cursorEl = null, geom = null;
+function setCursor(x) {
+  if (!cursorEl) return;
+  if (x == null) { cursorEl.setAttribute("display","none"); return; }
+  cursorEl.setAttribute("x1", x); cursorEl.setAttribute("x2", x); cursorEl.removeAttribute("display");
+}
+
+// ---------- Settings / state ----------
+const $ = id => document.getElementById(id);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("pt_"+k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("pt_"+k, JSON.stringify(v)); } catch {} },
+};
+let selectedKeys = new Set();
+const keySel = $("keySel");
+function addOpt(value, text, group) {
+  const o = document.createElement("option");
+  o.value = value; o.textContent = text; (group || keySel).append(o);
+}
+addOpt("all", "All keys (random)");
+addOpt("sharps", "Sharp keys (C–C♯)");
+addOpt("flats", "Flat keys (C–C♭)");
+const gS = document.createElement("optgroup"); gS.label = "Sharps";
+const gF = document.createElement("optgroup"); gF.label = "Flats";
+KEYS.forEach(k => {
+  const t = k.n === 0 ? "C major / A minor (no sharps or flats)"
+    : `${k.major} major / ${k.minor} minor (${Math.abs(k.n)}${k.n>0?"♯":"♭"})`;
+  addOpt(String(k.n), t, k.n > 0 ? gS : k.n < 0 ? gF : keySel);
+});
+keySel.append(gS, gF);
+function setKeys(pred) { selectedKeys = new Set(KEYS.filter(k => pred(k.n)).map(k => k.n)); }
+function applyKeySel() {
+  const v = keySel.value;
+  if (v === "all") setKeys(() => true);
+  else if (v === "sharps") setKeys(n => n >= 0);
+  else if (v === "flats") setKeys(n => n <= 0);
+  else setKeys(n => n === +v);
+}
+const savedKey = store.get("keySel", "0");
+keySel.value = savedKey;
+if (!keySel.value) keySel.value = "0";
+applyKeySel();
+keySel.onchange = () => { store.set("keySel", keySel.value); applyKeySel(); last = null; newQuestion(); };
+
+const noteBoxes = [...document.querySelectorAll("#noteVals input")];
+const savedVals = store.get("noteVals", ["1"]);
+noteBoxes.forEach(b => {
+  b.checked = savedVals.includes(b.value);
+  b.onchange = () => {
+    if (!noteBoxes.some(x => x.checked)) b.checked = true;   // keep at least one
+    store.set("noteVals", noteBoxes.filter(x => x.checked).map(x => x.value));
+    newQuestion();
+  };
+});
+if (!noteBoxes.some(x => x.checked)) noteBoxes.find(b => b.value === "1").checked = true;
+const allowedDurs = () => noteBoxes.filter(b => b.checked).map(b => +b.value);
+["mode","clef","kbLo"].forEach(id => { const sk = id === "clef" ? "clef2" : id; $(id).value = store.get(sk, $(id).value); if (!$(id).value) $(id).selectedIndex = 0; $(id).onchange = () => { store.set(sk,$(id).value); if (id==="kbLo") buildPiano(); newQuestion(); }; });
+["showAlt","showKb","sound"].forEach(id => { $(id).checked = store.get(id, true); $(id).onchange = () => { store.set(id,$(id).checked); applyKb(); if (q) setPrompt(); }; });
+function applyKb() { $("piano").style.display = $("showKb").checked ? "" : "none"; }
+applyKb();
+
+// ---------- Question logic ----------
+let q = null;          // current question
+let last = null;       // last note signature to avoid repeats
+const session = { correct:0, total:0, streak:0, time:0 };
+let perKey = store.get("perKey", {});
+
+function randInt(a,b) { return a + Math.floor(Math.random()*(b-a+1)); }
+function pick(arr) { return arr[Math.floor(Math.random()*arr.length)]; }
+
+// Sets dur and pos (beat position, 4/4) on each note, picking randomly from the allowed values.
+// Notes never cross a barline and are beat-aligned (half on beats 1/3, whole on beat 1, eighths in pairs).
+function assignDurations(notes, allowed) {
+  let pos = 0;
+  notes.forEach((nt, i) => {
+    let d;
+    if (pos % 1 !== 0) d = 0.5;
+    else {
+      let opts = allowed.filter(v => v <= 1 || pos % v === 0);
+      if (i === notes.length - 1 && opts.some(v => v !== 0.5)) opts = opts.filter(v => v !== 0.5);
+      d = pick(opts);
+    }
+    nt.dur = d; nt.pos = pos; pos += d;
+  });
+}
+
+function newQuestion() {
+  stopRun();
+  const keys = [...selectedKeys];
+  if (!keys.length) { $("prompt").textContent = "Select at least one key signature."; return; }
+  const n = pick(keys);
+  const alts = alterations(n);
+  const clefMode = $("clef").value;
+  const lo0 = +$("kbLo").value;
+  // pick a clef that actually has notes on the keyboard
+  const clef = clefMode === "both" ? (lo0 >= 60 ? "treble" : lo0 <= 36 ? "bass" : pick(["treble","bass"])) : clefMode;
+  const mode = $("mode").value;
+  const lo = +$("kbLo").value, hi = lo + 24;
+  const tl = tonicLetter(n);
+  const maxStep = { walk1: 1, walk2: 2, walk3: 3 }[mode] || 0;
+  let offsets, baseLetter = tl;
+  if (!maxStep) offsets = [0,1,2,3,4,5,6,7,6,5,4,3,2,1,0];
+  else {
+    // random walk: each move is 1..maxStep scale steps, up or down, within a compact span
+    const len = 16;
+    do {
+      offsets = [0];
+      let dir = pick([1,-1]);
+      while (offsets.length < len) {
+        if (Math.random() < 0.3) dir = -dir;
+        const size = maxStep === 1 ? 1 : randInt(1, maxStep);
+        offsets.push(offsets[offsets.length-1] + dir * size);
+      }
+    } while (Math.max(...offsets) - Math.min(...offsets) > 9 || Math.max(...offsets) <= 0 || Math.min(...offsets) >= 0);
+    baseLetter = (tl + randInt(0,6)) % 7;
+  }
+  const fits = [];
+  for (let st = 14; st < 49; st++) {
+    if (stepLetter(st) !== baseLetter) continue;
+    if (offsets.every(o => { const x = st + o, m = midiOf(x, alts[stepLetter(x)]); return m >= lo && m <= hi; })) fits.push(st);
+  }
+  if (!fits.length) return newQuestion();
+  const avg = offsets.reduce((a,b)=>a+b,0) / offsets.length;
+  const clefOf = st => st + avg >= 28 ? "treble" : "bass";
+  const center = { treble: 34, bass: 22 };
+  let pool = fits;
+  if (clefMode !== "both") {
+    const dist = st => Math.abs(st + avg - center[clef]);
+    const best = Math.min(...fits.map(dist));
+    pool = fits.filter(st => dist(st) === best);
+  }
+  const s0 = pick(pool);
+  const useClef = clefOf(s0);
+  const notes = offsets.map(o => { const step = s0 + o; return {step, alt: alts[stepLetter(step)], clef: useClef}; });
+  notes.forEach(nt => nt.midi = midiOf(nt.step, nt.alt));
+  assignDurations(notes, allowedDurs());
+  q = { n, clefMode, clef, mode, notes, idx: 0, misses: 0, firstTry: true, start: performance.now(), done: false,
+        timed: isTimed(), results: [], running: false, ran: false };
+  paint();
+  $("feedback").textContent = "";
+  $("stage").className = "";
+  setPrompt();
+  clearKbMarks();
+}
+
+function setPrompt() {
+  const k = keyByN(q.n);
+  $("prompt").textContent = `Key signature: ${keyLabel(k)} — ${sigText(q.n)}` +
+    ($("showAlt").checked && q.n !== 0 ? ` (${altList(q.n)})` : "") +
+    ({
+      scale: `  ·  play the ${k.major} major scale up, then back down`,
+      walk1: `  ·  follow the melody (1 step at a time)`,
+      walk2: `  ·  follow the melody (steps of 1 or 2)`,
+      walk3: `  ·  follow the melody (steps of 1 to 3)`,
+    })[q.mode];
+}
+
+function paint() {
+  const notes = q.notes.map((nt,i) => ({...nt, state: q.timed
+    ? (q.results[i] || (q.running && i===q.idx ? "current" : undefined))
+    : (q.notes.length>1 ? (i<q.idx?"done":i===q.idx?"current":undefined) : (q.done?"done":undefined))}));
+  renderStaff($("staff"), q.clefMode, q.n, notes);
+}
+
+function record(ms, firstTry) {
+  session.total++; session.time += ms;
+  if (firstTry) { session.correct++; session.streak++; } else session.streak = 0;
+  const key = String(q.n);
+  const r = perKey[key] || { total:0, good:0, ms:0 };
+  r.total++; r.ms += ms; if (firstTry) r.good++;
+  perKey[key] = r; store.set("perKey", perKey);
+  updateStats();
+}
+
+function updateStats() {
+  $("sCorrect").textContent = session.correct;
+  $("sTotal").textContent = session.total;
+  $("sStreak").textContent = session.streak;
+  $("sAvg").textContent = session.total ? (session.time/session.total/1000).toFixed(1) : "–";
+  const tb = $("perKey").querySelector("tbody"); tb.innerHTML = "";
+  for (const k of KEYS) {
+    const r = perKey[String(k.n)]; if (!r) continue;
+    const tr = document.createElement("tr");
+    [k.major + " major", r.total, Math.round(100*r.good/r.total)+"%", (r.ms/r.total/1000).toFixed(1)].forEach(v => {
+      const td = document.createElement("td"); td.textContent = v; tr.append(td);
+    });
+    tb.append(tr);
+  }
+}
+
+function handleNote(midi) {
+  if (!q || q.done) return;
+  if (q.timed) return handleTimed(midi);
+  const target = q.notes[q.idx];
+  if (midi === target.midi) {
+    markKey(midi, "good");
+    q.idx++;
+    if (q.idx >= q.notes.length) {
+      q.done = true;
+      const ms = performance.now() - q.start;
+      record(ms, q.firstTry);
+      paint();
+      $("stage").className = "ok";
+      $("feedback").style.color = "var(--ok)";
+      $("feedback").textContent = `✔ Complete (${(ms/1000).toFixed(1)}s)`;
+      setTimeout(() => { if (q.done) newQuestion(); }, q.firstTry ? 700 : 1500);
+    } else paint();
+  } else {
+    q.firstTry = false; q.misses++;
+    markKey(midi, "wrong");
+    $("stage").className = "bad";
+    $("feedback").style.color = "var(--bad)";
+    $("feedback").textContent = `✘ ${midiName(midi)} — try again` + (q.misses >= 3 ? ` (hint: ${noteName(target.step, target.alt)})` : "");
+    setTimeout(() => { if (q && !q.done) $("stage").className = ""; }, 350);
+  }
+}
+
+$("start").onclick = () => { if (!isTimed()) return newQuestion(); if (q.ran) newQuestion(); startRun(); };
+$("skip").onclick = () => {
+  if (!q || q.done || q.timed) return;
+  const t = q.notes[q.idx];
+  q.firstTry = false;
+  $("feedback").style.color = "var(--fg)";
+  $("feedback").textContent = `Answer: ${noteName(t.step, t.alt)}`;
+  markKey(t.midi, "good");
+};
+$("reset").onclick = () => { perKey = {}; store.set("perKey", {}); session.correct = session.total = session.streak = session.time = 0; updateStats(); };
+
+// ---------- Audio ----------
+let actx = null;
+function unlockAudio() {
+  actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+  if (actx.state === "suspended") actx.resume();
+}
+["pointerdown","keydown"].forEach(ev => document.addEventListener(ev, unlockAudio));
+function beep(midi, dur = 0.5) {
+  if (!$("sound").checked) return;
+  unlockAudio();
+  if (actx.state === "suspended") actx.resume();
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = "triangle"; o.frequency.value = 440 * Math.pow(2, (midi-69)/12);
+  g.gain.setValueAtTime(0.0001, actx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.25, actx.currentTime + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + dur);
+  o.connect(g).connect(actx.destination); o.start(); o.stop(actx.currentTime + dur + 0.05);
+}
+// ---------- Metronome / timed play ----------
+const GOOD = 0.3, WINDOW = 0.5;   // fractions of a beat
+const winOf = nt => Math.min(WINDOW, nt.dur / 2), goodOf = nt => Math.min(GOOD, nt.dur * 0.3);
+let run = null;
+const isTimed = () => $("playMode").value === "metro";
+const beatMs = () => 60000 / bpmVal();
+function bpmVal() { return Math.min(200, Math.max(30, +$("bpm").value || 70)); }
+function click(accent) {
+  unlockAudio();
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.frequency.value = accent ? 1500 : 1000;
+  g.gain.setValueAtTime(0.0001, actx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.3, actx.currentTime + 0.002);
+  g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + 0.06);
+  o.connect(g).connect(actx.destination); o.start(); o.stop(actx.currentTime + 0.08);
+}
+function showBeat(b) {
+  [...$("beats").children].forEach((d,i) => { d.className = b != null && i === b % 4 ? "on" + (i===0?" first":"") : ""; });
+}
+// note i is due at beat COUNT_IN + i after the start
+const COUNT_IN = 4;
+function startRun() {
+  stopRun();
+  q.timed = true; q.ran = true; q.running = true; q.idx = 0; q.results = []; q.offsets = [];
+  q.misses = 0; q.firstTry = true; q.done = false;
+  q.wrongs = 0;
+  run = { t0: performance.now() + 150, bm: beatMs(), lastBeat: -1, raf: 0 };
+  $("stage").className = ""; clearKbMarks();
+  $("feedback").textContent = ""; $("feedback").style.color = "var(--fg)";
+  paint();
+  const frame = () => {
+    if (!run) return;
+    const el = performance.now() - run.t0, bm = run.bm, N = q.notes.length, last = q.notes[N-1];
+    const beat = el / bm, b = Math.floor(beat);
+    if (b > run.lastBeat && b >= 0) {
+      run.lastBeat = b;
+      if (b < COUNT_IN + Math.ceil(last.pos + last.dur)) { click(b % 4 === 0); showBeat(b); }
+      if (b < COUNT_IN) { $("feedback").style.color = "var(--fg)"; $("feedback").textContent = `Get ready… ${b + 1}`; }
+      else if (b === COUNT_IN) $("feedback").textContent = "Play!";
+    }
+    // cursor: sweeps in during the last count-in beat, then through the notes
+    if (beat >= COUNT_IN - 1 && geom) {
+      let x;
+      if (beat < COUNT_IN) x = geom.xStart + (geom.xAt(0) - geom.xStart) * (beat - (COUNT_IN - 1));
+      else {
+        const nb = beat - COUNT_IN;
+        let i = 0;
+        while (i < N - 1 && q.notes[i + 1].pos <= nb) i++;
+        x = i >= N - 1 ? geom.xAt(N - 1)
+          : geom.xAt(i) + (nb - q.notes[i].pos) / (q.notes[i + 1].pos - q.notes[i].pos) * (geom.xAt(i + 1) - geom.xAt(i));
+      }
+      setCursor(x);
+    }
+    // notes whose window has closed are missed
+    let changed = false;
+    while (q.idx < N && beat > COUNT_IN + q.notes[q.idx].pos + winOf(q.notes[q.idx])) { q.results[q.idx] = "miss"; q.firstTry = false; q.idx++; changed = true; }
+    if (changed) paint();
+    if (q.idx >= N && beat >= COUNT_IN + last.pos) return finishRun();
+    run.raf = requestAnimationFrame(frame);
+  };
+  run.raf = requestAnimationFrame(frame);
+}
+function stopRun() {
+  if (run) cancelAnimationFrame(run.raf);
+  run = null;
+  if (q) q.running = false;
+  showBeat(null); setCursor(null);
+}
+function handleTimed(midi) {
+  if (!q.running || !run) return;
+  const el = performance.now() - run.t0, bm = run.bm;
+  const target = q.notes[q.idx];
+  const err = el / bm - (COUNT_IN + target.pos);     // beats; negative = early
+  if (err < -winOf(target)) { markKey(midi, "wrong"); return; }
+  if (midi !== target.midi) {
+    q.firstTry = false; q.wrongs++;
+    markKey(midi, "wrong");
+    return;
+  }
+  markKey(midi, "good");
+  q.results[q.idx] = Math.abs(err) <= goodOf(target) ? "good" : "off";
+  q.offsets.push(err * bm);
+  q.idx++;
+  paint();
+}
+function finishRun() {
+  const res = q.results, N = res.length;
+  const good = res.filter(r => r === "good").length, off = res.filter(r => r === "off").length, miss = res.filter(r => r === "miss").length;
+  const avg = q.offsets.length ? q.offsets.reduce((a,b)=>a+b,0) / q.offsets.length : 0;
+  const ms = run ? performance.now() - run.t0 : 0;
+  stopRun();
+  q.done = true;
+  record(ms, q.firstTry && off === 0);
+  paint();
+  const perfect = miss === 0 && off === 0 && q.wrongs === 0;
+  $("stage").className = miss === 0 ? "ok" : "bad";
+  $("feedback").style.color = miss === 0 ? "var(--ok)" : "var(--bad)";
+  $("feedback").textContent = `${perfect ? "✔ " : ""}${good}/${N} on time · ${off} off-beat · ${miss} missed` +
+    (q.wrongs ? ` · ${q.wrongs} wrong` : "") +
+    (q.offsets.length ? ` · avg ${Math.abs(Math.round(avg))} ms ${avg < 0 ? "early" : "late"}` : "") +
+    "  — press Start for next";
+}
+$("bpm").value = store.get("bpm2", 70);
+$("bpm").onchange = () => { store.set("bpm2", bpmVal()); $("bpm").value = bpmVal(); if (q && q.running) newQuestion(); };
+$("playMode").value = store.get("playMode", "free");
+function applyPlayMode() { $("bpmBox").style.display = isTimed() ? "" : "none"; }
+$("playMode").onchange = () => { store.set("playMode", $("playMode").value); applyPlayMode(); newQuestion(); };
+applyPlayMode();
+
+const PC_NAMES = ["C","C♯/D♭","D","D♯/E♭","E","F","F♯/G♭","G","G♯/A♭","A","A♯/B♭","B"];
+const midiName = m => PC_NAMES[m%12] + (Math.floor(m/12)-1);
+
+// ---------- On-screen keyboard (C2..C6) ----------
+let keyEls = {};
+// Computer keyboard: offsets from the lowest C (Q = lowest C). Letters are white keys, number row is black keys;
+// the top 5 keys run out of top-row space and continue on the Z row.
+const KEY_CODES = ["KeyQ","Digit2","KeyW","Digit3","KeyE","KeyR","Digit5","KeyT","Digit6","KeyY","Digit7","KeyU",
+  "KeyI","Digit9","KeyO","Digit0","KeyP","BracketLeft","Equal","BracketRight","KeyZ","KeyX","KeyD","KeyC","KeyV"];
+const KEY_LABEL = KEY_CODES.map(c => c.replace(/^(Key|Digit)/, "").replace("BracketLeft","[").replace("BracketRight","]").replace("Equal","="));
+const heldKeys = new Map();
+document.addEventListener("keydown", e => {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const t = e.target;
+  if (t && t.tagName === "INPUT" && t.type !== "checkbox") return;
+  const off = KEY_CODES.indexOf(e.code);
+  if (off < 0) return;
+  e.preventDefault();
+  if (e.repeat || heldKeys.has(e.code)) return;
+  const m = +$("kbLo").value + off;
+  heldKeys.set(e.code, m);
+  if (keyEls[m]) keyEls[m].classList.add("down");
+  press(m);
+});
+document.addEventListener("keyup", e => {
+  const m = heldKeys.get(e.code);
+  if (m == null) return;
+  heldKeys.delete(e.code);
+  if (keyEls[m]) keyEls[m].classList.remove("down");
+});
+window.addEventListener("blur", () => { heldKeys.forEach(m => keyEls[m] && keyEls[m].classList.remove("down")); heldKeys.clear(); });
+function buildPiano() {
+  const inner = $("pianoInner");
+  inner.innerHTML = ""; keyEls = {};
+  const KB_LO = +$("kbLo").value, KB_HI = KB_LO + 24;
+  const isBlack = m => [1,3,6,8,10].includes(m%12);
+  let wx = 0;
+  const WW = 40;
+  for (let m = KB_LO; m <= KB_HI; m++) {
+    const d = document.createElement("div");
+    d.dataset.m = m;
+    if (!isBlack(m)) { d.className = "wk"; d.style.left = wx + "px"; d.style.width = WW + "px"; wx += WW; }
+    else { d.className = "bk"; d.style.left = (wx - 12) + "px"; d.style.width = "24px"; }
+    if (m % 12 === 0) { d.title = "C" + (m/12-1); }
+    const lab = KEY_LABEL[m - KB_LO];
+    if (lab) { const s = document.createElement("span"); s.className = "kl"; s.textContent = lab; d.appendChild(s); }
+    d.addEventListener("pointerdown", e => { e.preventDefault(); press(m); });
+    inner.appendChild(d); keyEls[m] = d;
+  }
+  inner.style.width = wx + "px";
+}
+buildPiano();
+function markKey(m, cls) {
+  const e = keyEls[m]; if (!e) return;
+  e.classList.add(cls);
+  setTimeout(() => e.classList.remove(cls), 500);
+}
+function clearKbMarks() { Object.values(keyEls).forEach(e => e.classList.remove("good","wrong","down")); }
+function press(m) { beep(m); handleNote(m); }
+
+// ---------- Web MIDI ----------
+const midiStatus = $("midiStatus"), midiSel = $("midiInput");
+let midiAccess = null, activeInput = null;
+function attachInput() {
+  const inputs = [...midiAccess.inputs.values()];
+  midiSel.hidden = true;
+  inputs.forEach(i => {
+    i.onmidimessage = ev => {
+      const [st, note, vel] = ev.data;
+      const cmd = st & 0xf0;
+      if (cmd === 0x90 && vel > 0) { keyEls[note]?.classList.add("down"); beep(note); handleNote(note); }
+      else if (cmd === 0x80 || (cmd === 0x90 && vel === 0)) keyEls[note]?.classList.remove("down");
+    };
+  });
+  if (!inputs.length) { midiStatus.textContent = "MIDI: no keyboard found (plug in & reload, or click the on-screen keys)"; midiStatus.className = ""; return; }
+  midiStatus.textContent = "MIDI: listening to " + inputs.map(i => i.name).join(", "); midiStatus.className = "on";
+}
+if (navigator.requestMIDIAccess) {
+  navigator.requestMIDIAccess().then(a => { midiAccess = a; a.onstatechange = attachInput; attachInput(); },
+    () => { midiStatus.textContent = "MIDI: access denied – use on-screen keys"; });
+} else midiStatus.textContent = "MIDI: not supported in this browser (use Chrome/Edge) – use on-screen keys";
+
+updateStats();
+newQuestion();
+</script>
+</body>
+</html>
