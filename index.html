@@ -191,6 +191,8 @@ const CLEFS = {
 // flats treble: B4 E5 A4 D5 G4 C5 F4; bass: B2 E3 A2 D3 G2 C3 F2
 const SP = 16, HALF = SP/2, TOP = 60;
 const W = 760;
+const BEATS_PER_MEASURE = 4, MEASURE_COUNT = 4;
+const STAFF_BEATS = BEATS_PER_MEASURE * MEASURE_COUNT;
 
 function staffLayout(clefMode) {
   const both = clefMode === "both";
@@ -239,17 +241,10 @@ function renderStaff(svg, clefMode, n, notes) {
   }
 
   const startX = x0 + 70 + Math.abs(n)*15 + 8 + 24 + 22;
-  const count = notes.length;
-  const barOf = nt => Math.floor(nt.pos / 4 + 1e-9);
-  const bars = count ? barOf(notes[count-1]) : 0;
-  const BAR = bars > 8 ? 8 : 16;
-  const cum = []; let acc = 0;
-  notes.forEach((nt, i) => { cum[i] = acc; acc += nt.dur < 1 ? 0.75 : 1; });
-  const gap = count > 1 ? Math.min(60, (x1 - 30 - startX - bars*BAR) / cum[count-1]) : 0;
-  const xAt = i => count === 1 ? (startX + x1)/2 : startX + cum[i]*gap + barOf(notes[i])*BAR;
-  for (let i=1;i<count;i++) {
-    if (barOf(notes[i]) === barOf(notes[i-1])) continue;
-    const bx = (xAt(i-1) + xAt(i))/2;
+  const contentWidth = x1 - 10 - startX;
+  const xAt = i => startX + (notes[i].pos + notes[i].dur/2) / STAFF_BEATS * contentWidth;
+  for (let bar=1;bar<MEASURE_COUNT;bar++) {
+    const bx = startX + bar / MEASURE_COUNT * contentWidth;
     for (const c of clefs) svg.appendChild(el("line",{x1:bx,x2:bx,y1:topOf(c),y2:topOf(c)+4*SP,stroke:"#222","stroke-width":1.4}));
   }
   notes.forEach((nt, i) => {
@@ -352,20 +347,23 @@ let perKey = store.get("perKey", {});
 function randInt(a,b) { return a + Math.floor(Math.random()*(b-a+1)); }
 function pick(arr) { return arr[Math.floor(Math.random()*arr.length)]; }
 
-// Sets dur and pos (beat position, 4/4) on each note, picking randomly from the allowed values.
-// Notes never cross a barline and are beat-aligned (half on beats 1/3, whole on beat 1, eighths in pairs).
+// Assign notes that fit within four 4/4 measures, without crossing barlines.
 function assignDurations(notes, allowed) {
   let pos = 0;
-  notes.forEach((nt, i) => {
-    let d;
-    if (pos % 1 !== 0) d = 0.5;
-    else {
-      let opts = allowed.filter(v => v <= 1 || pos % v === 0);
-      if (i === notes.length - 1 && opts.some(v => v !== 0.5)) opts = opts.filter(v => v !== 0.5);
-      d = pick(opts);
-    }
-    nt.dur = d; nt.pos = pos; pos += d;
-  });
+  const assigned = [];
+  for (const nt of notes) {
+    if (pos >= STAFF_BEATS) break;
+    const measureRemaining = BEATS_PER_MEASURE - pos % BEATS_PER_MEASURE;
+    const remaining = STAFF_BEATS - pos;
+    let opts = allowed.filter(v => v <= measureRemaining && v <= remaining);
+    if (pos % 1 !== 0) opts = opts.filter(v => v === 0.5);
+    if (!opts.length) break;
+    nt.dur = pick(opts);
+    nt.pos = pos;
+    assigned.push(nt);
+    pos += nt.dur;
+  }
+  return assigned;
 }
 
 function newQuestion() {
@@ -417,8 +415,8 @@ function newQuestion() {
   const useClef = clefOf(s0);
   const notes = offsets.map(o => { const step = s0 + o; return {step, alt: alts[stepLetter(step)], clef: useClef}; });
   notes.forEach(nt => nt.midi = midiOf(nt.step, nt.alt));
-  assignDurations(notes, allowedDurs());
-  q = { n, clefMode, clef, mode, notes, idx: 0, misses: 0, firstTry: true, start: performance.now(), done: false,
+  const playableNotes = assignDurations(notes, allowedDurs());
+  q = { n, clefMode, clef, mode, notes: playableNotes, idx: 0, misses: 0, firstTry: true, start: performance.now(), done: false,
         timed: isTimed(), results: [], running: false, ran: false };
   paint();
   $("feedback").textContent = "";
@@ -432,7 +430,7 @@ function setPrompt() {
   $("prompt").textContent = `Key signature: ${keyLabel(k)} — ${sigText(q.n)}` +
     ($("showAlt").checked && q.n !== 0 ? ` (${altList(q.n)})` : "") +
     ({
-      scale: `  ·  play the ${k.major} major scale up, then back down`,
+      scale: `  ·  play the ${k.major} major scale up and down for four measures`,
       walk1: `  ·  follow the melody (1 step at a time)`,
       walk2: `  ·  follow the melody (steps of 1 or 2)`,
       walk3: `  ·  follow the melody (steps of 1 to 3)`,
